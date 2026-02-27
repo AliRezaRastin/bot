@@ -79,11 +79,13 @@ def update_balance(user_id, amount):
     )
     conn.commit()
 
-def get_username(user_id):
-    cursor.execute("SELECT username FROM users WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-    return result[0] if result else "کاربر"
-
+def get_user(user_id):
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    if not row:
+        # فقط اگر کاربر وجود نداشت، اضافه شود و موجودی اولیه 100 داده شود
+        cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, 100))
+        conn.commit()
 # ================== کیبورد پیوی ==================
 
 def main_keyboard():
