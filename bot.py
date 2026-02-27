@@ -19,6 +19,19 @@ TOKEN = os.environ["TOKEN"]
 CHANNEL_USERNAME = "slfvtn"
 CHANNEL_LINK = "https://t.me/slfvtn"
 
+# ================== FORCE JOIN ==================
+REQUIRED_CHANNELS = [
+    {
+        "username": "slfvtn",
+        "link": "https://t.me/slfvtn"
+    },
+    {
+        "username": "mohamaj_y",
+        "link": "https://t.me/mohamaj_y"
+    }
+]
+
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
@@ -397,35 +410,43 @@ async def transfer_coins(message: types.Message):
 
 
 # ================== FORCE JOIN CHECK ==================
+# ================== FORCE JOIN CHECK ==================
 @dp.message_handler(lambda message: message.chat.type in ["group", "supergroup"], content_types=types.ContentTypes.ANY)
 async def force_join_check(message: types.Message):
     user_id = message.from_user.id
+    not_joined = []
 
-    try:
-        member = await bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
+    for channel in REQUIRED_CHANNELS:
+        try:
+            member = await bot.get_chat_member(f"@{channel['username']}", user_id)
 
-        # اگر عضو نبود
-        if member.status in ["left", "kicked"]:
-            try:
-                await message.delete()
-            except:
-                pass
+            if member.status in ["left", "kicked"]:
+                not_joined.append(channel)
 
-            keyboard = InlineKeyboardMarkup()
+        except:
+            # اگر ربات ادمین نباشد خطا می‌دهد
+            pass
+
+    if not_joined:
+        try:
+            await message.delete()
+        except:
+            pass
+
+        keyboard = InlineKeyboardMarkup(row_width=1)
+
+        for channel in not_joined:
             keyboard.add(
-                InlineKeyboardButton("📢 عضویت در کانال", url=CHANNEL_LINK)
+                InlineKeyboardButton(
+                    f"📢 عضویت در {channel['username']}",
+                    url=channel["link"]
+                )
             )
 
-            await message.answer(
-                "❌ برای ارسال پیام باید عضو کانال زیر شوید 👇",
-                reply_markup=keyboard
-            )
-            return
-
-    except:
-        # اگر ربات داخل کانال ادمین نباشد اینجا خطا می‌دهد
-        pass
-
+        await message.answer(
+            "❌ برای ارسال پیام باید عضو کانال‌های زیر شوید 👇",
+            reply_markup=keyboard
+        )
 # ================== وب سرور ==================
 
 class Handler(BaseHTTPRequestHandler):
