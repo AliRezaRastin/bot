@@ -33,7 +33,11 @@ def get_user(user_id):
         cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
 
-# ================== ابزار نمایش نام ==================
+def get_balance(user_id):
+    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
+    return cursor.fetchone()[0]
+
+# ================== نمایش نام ==================
 
 def get_display_name(user: types.User):
     if user.username:
@@ -44,12 +48,24 @@ def get_display_name(user: types.User):
 
 waiting_games = {}
 
-# ================== شروع ==================
+# ================== /start ==================
 
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
     get_user(message.from_user.id)
     await message.reply("🎮 خوش آمدی به ربات علی!\nموجودی اولیه: 100 💎")
+
+# ================== موجودی ==================
+
+@dp.message_handler(lambda message: message.text == "موجودی")
+async def balance_handler(message: types.Message):
+    get_user(message.from_user.id)
+    balance = get_balance(message.from_user.id)
+    name = get_display_name(message.from_user)
+
+    await message.reply(
+        f"💰 موجودی {name} : {balance} سکه 💎"
+    )
 
 # ================== ساخت بازی ==================
 
@@ -67,9 +83,7 @@ async def game(message: types.Message):
         return
 
     get_user(message.from_user.id)
-
-    cursor.execute("SELECT balance FROM users WHERE user_id=?", (message.from_user.id,))
-    balance = cursor.fetchone()[0]
+    balance = get_balance(message.from_user.id)
 
     if balance < amount:
         await message.reply("❌ موجودی کافی نیست")
@@ -90,6 +104,7 @@ async def game(message: types.Message):
     msg = await message.reply(
         f"🎮 بازی {amount} 💎 ساخته شد!\n\n"
         f"👤 سازنده: {creator_name}\n"
+        f"🎁 جایزه: {amount * 2} سکه\n"
         f"منتظر بازیکن دوم...",
         reply_markup=keyboard
     )
@@ -100,7 +115,7 @@ async def game(message: types.Message):
         "message_id": msg.message_id
     }
 
-# ================== مدیریت دکمه‌ها ==================
+# ================== دکمه‌ها ==================
 
 @dp.callback_query_handler(lambda c: c.data.startswith(("join_", "cancel_")))
 async def process_callback(callback: CallbackQuery):
@@ -139,37 +154,45 @@ async def process_callback(callback: CallbackQuery):
             return
 
         get_user(user_id)
-
-        cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-        balance = cursor.fetchone()[0]
+        balance = get_balance(user_id)
 
         if balance < amount:
             await callback.answer("❌ موجودی کافی نیست", show_alert=True)
             return
 
-        # انتخاب برنده
+        # هر دو مبلغ را از قبل دارند → برنده کل جایزه را می‌گیرد
+        prize = amount * 2
+
         winner_id = random.choice([creator_id, user_id])
         loser_id = creator_id if winner_id == user_id else user_id
 
         winner_name = creator_name if winner_id == creator_id else user_name
         loser_name = creator_name if loser_id == creator_id else user_name
 
-        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, winner_id))
-        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, loser_id))
+        # کم کردن از هر دو
+        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, creator_id))
+        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, user_id))
+
+        # اضافه کردن جایزه به برنده
+        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (prize, winner_id))
         conn.commit()
+
+        new_balance = get_balance(winner_id)
 
         del waiting_games[amount]
 
         await callback.message.edit_text(
             f"🎲 بازی انجام شد!\n\n"
-            f"💰 مبلغ شرط: {amount} سکه\n\n"
+            f"💰 مبلغ هر نفر: {amount} سکه\n"
+            f"🎁 جایزه کل: {prize} سکه\n\n"
             f"🏆 برنده: {winner_name}\n"
+            f"💎 موجودی جدید برنده: {new_balance} سکه\n\n"
             f"💀 بازنده: {loser_name}"
         )
 
         await callback.answer("بازی انجام شد!")
 
-# ================== وب سرور برای Render ==================
+# ================== وب سرور ==================
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
