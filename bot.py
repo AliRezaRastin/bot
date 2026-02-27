@@ -27,36 +27,46 @@ cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
+    username TEXT,
     balance INTEGER DEFAULT 100
 )
 """)
 conn.commit()
 
-# ذخیره نام کاربران برای نمایش
-user_names = {}
+def register_user(user: types.User):
+    username = f"@{user.username}" if user.username else user.full_name
 
-def get_user(user: types.User):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user.id,))
-        conn.commit()
+    data = cursor.fetchone()
 
-    # ذخیره نام برای نمایش
-    if user.username:
-        user_names[user.id] = f"@{user.username}"
+    if not data:
+        cursor.execute(
+            "INSERT INTO users (user_id, username, balance) VALUES (?, ?, ?)",
+            (user.id, username, 100)
+        )
     else:
-        user_names[user.id] = user.full_name
+        cursor.execute(
+            "UPDATE users SET username=? WHERE user_id=?",
+            (username, user.id)
+        )
+
+    conn.commit()
 
 def get_balance(user_id):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
     return cursor.fetchone()[0]
 
-def add_balance(user_id, amount):
-    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
+def update_balance(user_id, amount):
+    cursor.execute(
+        "UPDATE users SET balance = balance + ? WHERE user_id=?",
+        (amount, user_id)
+    )
     conn.commit()
 
-def get_display_name_by_id(user_id):
-    return user_names.get(user_id, f"کاربر {user_id}")
+def get_username(user_id):
+    cursor.execute("SELECT username FROM users WHERE user_id=?", (user_id,))
+    result = cursor.fetchone()
+    return result[0] if result else "کاربر"
 
 # ================== کیبورد پیوی ==================
 
@@ -65,35 +75,33 @@ def main_keyboard():
     keyboard.add(KeyboardButton("💰 موجودی من"))
     return keyboard
 
-waiting_games = {}
-
 # ================== START ==================
 
 @dp.message_handler(commands=['start'], chat_type=types.ChatType.PRIVATE)
 async def start(message: types.Message):
-    get_user(message.from_user)
-    await message.answer("🎮 به ربات خوش آمدی!", reply_markup=main_keyboard())
+    register_user(message.from_user)
+    await message.answer("🎮 خوش آمدی!", reply_markup=main_keyboard())
 
-# ================== موجودی پیوی ==================
+# ================== موجودی ==================
 
 @dp.message_handler(lambda message: message.text == "💰 موجودی من", chat_type=types.ChatType.PRIVATE)
 async def balance_private(message: types.Message):
-    get_user(message.from_user)
+    register_user(message.from_user)
     balance = get_balance(message.from_user.id)
-    await message.answer(f"💰 موجودی شما: {balance} سکه 💎")
-
-# ================== موجودی گروه ==================
+    await message.answer(f"💰 موجودی شما: {balance} سکه")
 
 @dp.message_handler(lambda message: message.text == "موجودی")
 async def balance_group(message: types.Message):
-    get_user(message.from_user)
+    register_user(message.from_user)
     balance = get_balance(message.from_user.id)
-    name = get_display_name_by_id(message.from_user.id)
-    await message.reply(f"💰 موجودی {name}: {balance} سکه 💎")
+    username = get_username(message.from_user.id)
+    await message.reply(f"💰 موجودی {username}: {balance} سکه")
 
 # =====================================================
-# 🎲 بازی شرطی
+# 🎲 بازی شرطی دو نفره
 # =====================================================
+
+waiting_games = {}
 
 @dp.message_handler(lambda message: message.text and message.text.startswith("بازی"))
 async def betting_game(message: types.Message):
@@ -108,162 +116,169 @@ async def betting_game(message: types.Message):
         return
 
     if amount <= 0:
-        await message.reply("❌ مبلغ باید بیشتر از صفر باشد")
+        await message.reply("مبلغ باید بیشتر از صفر باشد")
         return
 
-    get_user(message.from_user)
-    balance = get_balance(message.from_user.id)
+    register_user(message.from_user)
 
-    if balance < amount:
-        await message.reply("❌ موجودی کافی نیست")
+    if get_balance(message.from_user.id) < amount:
+        await message.reply("موجودی کافی نیست")
         return
 
-    if amount in waiting_games:
-        await message.reply("❗ یک بازی با این مبلغ در انتظار است")
-        return
-
-    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard = InlineKeyboardMarkup()
     keyboard.add(
         InlineKeyboardButton("✅ پیوستن", callback_data=f"join_{amount}"),
-        InlineKeyboardButton("❌ لغو شرط", callback_data=f"cancel_{amount}")
-    )
-
-    creator_name = get_display_name_by_id(message.from_user.id)
-
-    await message.reply(
-        f"🎮 بازی {amount} سکه\n"
-        f"👤 سازنده: {creator_name}\n"
-        f"🎁 جایزه کل: {amount * 2} سکه\n\n"
-        f"منتظر بازیکن دوم...",
-        reply_markup=keyboard
+        InlineKeyboardButton("❌ لغو", callback_data=f"cancel_{amount}")
     )
 
     waiting_games[amount] = message.from_user.id
+    username = get_username(message.from_user.id)
+
+    await message.reply(
+        f"🎮 بازی {amount} سکه\n"
+        f"سازنده: {username}\n"
+        f"جایزه: {amount*2} سکه",
+        reply_markup=keyboard
+    )
 
 @dp.callback_query_handler(lambda c: c.data.startswith(("join_", "cancel_")))
-async def handle_betting(callback: CallbackQuery):
+async def handle_game(callback: CallbackQuery):
 
     action, amount = callback.data.split("_")
     amount = int(amount)
 
     if amount not in waiting_games:
-        await callback.answer("این بازی وجود ندارد", show_alert=True)
+        await callback.answer("بازی وجود ندارد", show_alert=True)
         return
 
     creator_id = waiting_games[amount]
-    user_id = callback.from_user.id
+    joiner_id = callback.from_user.id
 
-    get_user(callback.from_user)
+    register_user(callback.from_user)
 
     if action == "cancel":
-        if user_id != creator_id:
+        if joiner_id != creator_id:
             await callback.answer("فقط سازنده می‌تواند لغو کند", show_alert=True)
             return
 
         del waiting_games[amount]
         await callback.message.edit_text("❌ بازی لغو شد")
-        await callback.answer()
         return
 
     if action == "join":
 
-        if user_id == creator_id:
+        if joiner_id == creator_id:
             await callback.answer("نمی‌توانی به بازی خودت بپیوندی", show_alert=True)
             return
 
-        if get_balance(user_id) < amount:
+        if get_balance(joiner_id) < amount:
             await callback.answer("موجودی کافی نیست", show_alert=True)
             return
 
+        update_balance(creator_id, -amount)
+        update_balance(joiner_id, -amount)
+
+        winner = random.choice([creator_id, joiner_id])
+        loser = creator_id if winner == joiner_id else joiner_id
+
         prize = amount * 2
+        update_balance(winner, prize)
 
-        winner_id = random.choice([creator_id, user_id])
-        loser_id = creator_id if winner_id == user_id else user_id
-
-        winner_name = get_display_name_by_id(winner_id)
-        loser_name = get_display_name_by_id(loser_id)
-
-        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, creator_id))
-        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, user_id))
-        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (prize, winner_id))
-        conn.commit()
-
-        new_balance = get_balance(winner_id)
+        winner_name = get_username(winner)
+        loser_name = get_username(loser)
 
         del waiting_games[amount]
 
         await callback.message.edit_text(
-            f"🎲 بازی انجام شد!\n\n"
             f"🏆 برنده: {winner_name}\n"
-            f"💀 بازنده: {loser_name}\n\n"
-            f"🎁 جایزه: {prize} سکه\n"
-            f"💎 موجودی جدید برنده: {new_balance}"
+            f"❌ بازنده: {loser_name}\n"
+            f"🎁 جایزه: {prize} سکه"
         )
 
-        await callback.answer("بازی انجام شد!")
-
 # =====================================================
-# ✂️ سنگچی
+# ✂️ سنگچی (فقط سازنده بتواند بازی کند)
 # =====================================================
 
-@dp.message_handler(lambda message: message.text == "سنگچی")
-async def rock_paper_scissors(message: types.Message):
+@dp.message_handler(lambda message: message.text and message.text.startswith("سنگچی"))
+async def rps_game(message: types.Message):
 
-    get_user(message.from_user)
+    try:
+        stake = int(message.text.split()[1])
+    except:
+        await message.reply("فرمت صحیح:\nسنگچی 20")
+        return
 
-    keyboard = InlineKeyboardMarkup(row_width=3)
+    if stake <= 0:
+        await message.reply("عدد شرط نامعتبر است")
+        return
+
+    register_user(message.from_user)
+
+    if get_balance(message.from_user.id) < stake:
+        await message.reply("موجودی کافی نیست")
+        return
+
+    keyboard = InlineKeyboardMarkup()
     keyboard.add(
-        InlineKeyboardButton("🪨 سنگ", callback_data="rps_rock"),
-        InlineKeyboardButton("📄 کاغذ", callback_data="rps_paper"),
-        InlineKeyboardButton("✂ قیچی", callback_data="rps_scissors"),
+        InlineKeyboardButton("🪨 سنگ", callback_data=f"rps_rock_{stake}_{message.from_user.id}"),
+        InlineKeyboardButton("📄 کاغذ", callback_data=f"rps_paper_{stake}_{message.from_user.id}"),
+        InlineKeyboardButton("✂ قیچی", callback_data=f"rps_scissors_{stake}_{message.from_user.id}")
     )
 
-    await message.reply("🎮 سنگ کاغذ قیچی\nیکی را انتخاب کن 👇", reply_markup=keyboard)
+    await message.reply("انتخاب کن:", reply_markup=keyboard)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("rps_"))
 async def rps_result(callback: CallbackQuery):
 
-    get_user(callback.from_user)
+    _, user_choice, stake, owner_id = callback.data.split("_")
+    stake = int(stake)
+    owner_id = int(owner_id)
 
-    user_choice = callback.data.split("_")[1]
+    # فقط سازنده بازی اجازه دارد
+    if callback.from_user.id != owner_id:
+        await callback.answer("این بازی برای شما نیست ❌", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    register_user(callback.from_user)
+
+    if get_balance(user_id) < stake:
+        await callback.answer("موجودی کافی نیست", show_alert=True)
+        return
+
     bot_choice = random.choice(["rock", "paper", "scissors"])
 
-    result = ""
-    reward = 0
-
-    if user_choice == bot_choice:
-        result = "🤝 مساوی!"
-    elif (
+    win = (
         (user_choice == "rock" and bot_choice == "scissors") or
         (user_choice == "scissors" and bot_choice == "paper") or
         (user_choice == "paper" and bot_choice == "rock")
-    ):
-        result = "🏆 بردی!"
-        reward = 10
-        add_balance(callback.from_user.id, reward)
-    else:
-        result = "😢 باختی!"
-
-    balance = get_balance(callback.from_user.id)
-
-    emoji = {
-        "rock": "🪨 سنگ",
-        "paper": "📄 کاغذ",
-        "scissors": "✂ قیچی"
-    }
-
-    player_name = get_display_name_by_id(callback.from_user.id)
-
-    await callback.message.edit_text(
-        f"👤 بازیکن: {player_name}\n"
-        f"👤 انتخاب شما: {emoji[user_choice]}\n"
-        f"🤖 انتخاب ربات: {emoji[bot_choice]}\n\n"
-        f"{result}\n"
-        f"🎁 جایزه: {reward} سکه\n"
-        f"💎 موجودی فعلی: {balance}"
     )
 
-    await callback.answer()
+    if user_choice == bot_choice:
+        result = "مساوی"
+        reward = 0
+    elif win:
+        result = "بردی 🎉"
+        reward = stake
+        update_balance(user_id, stake)
+    else:
+        result = "باختی 😢"
+        reward = -stake
+        update_balance(user_id, -stake)
+
+    balance = get_balance(user_id)
+    username = get_username(user_id)
+
+    emoji = {"rock":"🪨","paper":"📄","scissors":"✂"}
+
+    await callback.message.edit_text(
+        f"بازیکن: {username}\n"
+        f"انتخاب شما: {emoji[user_choice]}\n"
+        f"انتخاب ربات: {emoji[bot_choice]}\n\n"
+        f"نتیجه: {result}\n"
+        f"تغییر موجودی: {reward}\n"
+        f"موجودی فعلی: {balance}"
+    )
 
 # ================== وب سرور ==================
 
