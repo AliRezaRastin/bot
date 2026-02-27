@@ -8,17 +8,19 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    CallbackQuery
+    CallbackQuery,
+    ReplyKeyboardMarkup,
+    KeyboardButton
 )
 from aiogram.utils import executor
 
-# ================== TOKEN ==================
 TOKEN = os.environ["TOKEN"]
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# ================== DATABASE ==================
+# ================== دیتابیس ==================
+
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -30,152 +32,72 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
-# این تابع فقط اگر کاربر وجود نداشته باشد ثبتش می‌کند
-def get_user(user_id):
-    cursor.execute("SELECT user_id FROM users WHERE user_id=?", (user_id,))
-    user = cursor.fetchone()
-    if user is None:
-        cursor.execute(
-            "INSERT INTO users (user_id, balance) VALUES (?, ?)",
-            (user_id, 100)
-        )
+# ذخیره نام کاربران برای نمایش
+user_names = {}
+
+def get_user(user: types.User):
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user.id,))
         conn.commit()
+
+    # ذخیره نام برای نمایش
+    if user.username:
+        user_names[user.id] = f"@{user.username}"
+    else:
+        user_names[user.id] = user.full_name
 
 def get_balance(user_id):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
     return cursor.fetchone()[0]
 
 def add_balance(user_id, amount):
-    cursor.execute(
-        "UPDATE users SET balance = balance + ? WHERE user_id=?",
-        (amount, user_id)
-    )
+    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
     conn.commit()
 
-def get_name(user):
-    return f"@{user.username}" if user.username else user.full_name
+def get_display_name_by_id(user_id):
+    return user_names.get(user_id, f"کاربر {user_id}")
 
+# ================== کیبورد پیوی ==================
 
-# ================== START ==================
-@dp.message_handler(commands=['start'], chat_type=types.ChatType.PRIVATE)
-async def start(message: types.Message):
-    get_user(message.from_user.id)
+def main_keyboard():
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton("💰 موجودی من"))
+    return keyboard
 
-    text = (
-        "🚀✨ به ربات پیشرفته خوش آمدید!\n\n"
-        "💎 اینجا می‌توانید بازی کنید و سکه جمع کنید!\n\n"
-        "👇 یکی از گزینه‌ها را انتخاب کنید:"
-    )
-
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("💰 موجودی من", callback_data="balance"),
-        InlineKeyboardButton("🎮 بازی شرطی", callback_data="bet_info"),
-        InlineKeyboardButton("✂ سنگ کاغذ قیچی", callback_data="rps_info"),
-        InlineKeyboardButton("👤 پروفایل", callback_data="profile")
-    )
-
-    await message.answer(text, reply_markup=keyboard)
-
-
-# ================== CALLBACK MENU ==================
-@dp.callback_query_handler(lambda c: c.data == "balance")
-async def balance_callback(callback: CallbackQuery):
-    get_user(callback.from_user.id)
-    balance = get_balance(callback.from_user.id)
-    await callback.answer()
-    await callback.message.answer(f"💰 موجودی شما: {balance} سکه 💎")
-
-
-@dp.callback_query_handler(lambda c: c.data == "profile")
-async def profile_callback(callback: CallbackQuery):
-    get_user(callback.from_user.id)
-    balance = get_balance(callback.from_user.id)
-    name = get_name(callback.from_user)
-    await callback.answer()
-    await callback.message.answer(
-        f"👤 نام: {name}\n"
-        f"💎 موجودی: {balance}"
-    )
-
-
-@dp.callback_query_handler(lambda c: c.data == "bet_info")
-async def bet_info(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer("برای ساخت بازی در گروه بنویس:\nبازی 50")
-
-
-@dp.callback_query_handler(lambda c: c.data == "rps_info")
-async def rps_info(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer("برای بازی بنویس:\nسنگچی 10")
-
-
-# ================== موجودی در گروه ==================
-@dp.message_handler(lambda message: message.text == "موجودی")
-async def balance_group(message: types.Message):
-    get_user(message.from_user.id)
-    balance = get_balance(message.from_user.id)
-    name = get_name(message.from_user)
-    await message.reply(f"💰 موجودی {name}: {balance} سکه 💎")
-
-
-# ================== انتقال سکه ==================
-@dp.message_handler(lambda message: message.text and message.text.startswith("انتقال"))
-async def transfer_coin(message: types.Message):
-    parts = message.text.split()
-
-    if len(parts) < 2:
-        await message.reply("فرمت صحیح:\nانتقال 50\nیا\nانتقال 50 123456789")
-        return
-
-    try:
-        amount = int(parts[1])
-    except:
-        await message.reply("❌ مبلغ نامعتبر است")
-        return
-
-    if amount <= 0:
-        await message.reply("❌ مبلغ باید بیشتر از صفر باشد")
-        return
-
-    sender_id = message.from_user.id
-    target_id = None
-
-    if message.reply_to_message:
-        target_id = message.reply_to_message.from_user.id
-    elif len(parts) >= 3:
-        try:
-            target_id = int(parts[2])
-        except:
-            await message.reply("❌ آیدی مقصد نامعتبر است (باید عدد باشد)")
-            return
-    else:
-        await message.reply("❌ باید روی پیام کاربر ریپلای کنید یا آیدی عددی وارد کنید")
-        return
-
-    if sender_id == target_id:
-        await message.reply("❌ نمی‌توانید به خودتان انتقال دهید")
-        return
-
-    get_user(sender_id)
-    get_user(target_id)
-
-    if get_balance(sender_id) < amount:
-        await message.reply("❌ موجودی کافی نیست")
-        return
-
-    add_balance(sender_id, -amount)
-    add_balance(target_id, amount)
-
-    await message.reply(f"✅ {amount} سکه با موفقیت منتقل شد!")
-
-
-# ================== BETTING GAME (GROUP) ==================
 waiting_games = {}
 
-@dp.message_handler(lambda m: m.text and m.text.startswith("بازی"))
+# ================== START ==================
+
+@dp.message_handler(commands=['start'], chat_type=types.ChatType.PRIVATE)
+async def start(message: types.Message):
+    get_user(message.from_user)
+    await message.answer("🎮 به ربات خوش آمدی!", reply_markup=main_keyboard())
+
+# ================== موجودی پیوی ==================
+
+@dp.message_handler(lambda message: message.text == "💰 موجودی من", chat_type=types.ChatType.PRIVATE)
+async def balance_private(message: types.Message):
+    get_user(message.from_user)
+    balance = get_balance(message.from_user.id)
+    await message.answer(f"💰 موجودی شما: {balance} سکه 💎")
+
+# ================== موجودی گروه ==================
+
+@dp.message_handler(lambda message: message.text == "موجودی")
+async def balance_group(message: types.Message):
+    get_user(message.from_user)
+    balance = get_balance(message.from_user.id)
+    name = get_display_name_by_id(message.from_user.id)
+    await message.reply(f"💰 موجودی {name}: {balance} سکه 💎")
+
+# =====================================================
+# 🎲 بازی شرطی
+# =====================================================
+
+@dp.message_handler(lambda message: message.text and message.text.startswith("بازی"))
 async def betting_game(message: types.Message):
+
     if message.chat.type == "private":
         return
 
@@ -186,159 +108,176 @@ async def betting_game(message: types.Message):
         return
 
     if amount <= 0:
-        await message.reply("❌ مبلغ نامعتبر است")
+        await message.reply("❌ مبلغ باید بیشتر از صفر باشد")
         return
 
-    get_user(message.from_user.id)
+    get_user(message.from_user)
+    balance = get_balance(message.from_user.id)
 
-    if get_balance(message.from_user.id) < amount:
+    if balance < amount:
         await message.reply("❌ موجودی کافی نیست")
         return
 
     if amount in waiting_games:
-        await message.reply("❗ یک بازی با این مبلغ فعال است")
+        await message.reply("❗ یک بازی با این مبلغ در انتظار است")
         return
 
-    keyboard = InlineKeyboardMarkup()
+    keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         InlineKeyboardButton("✅ پیوستن", callback_data=f"join_{amount}"),
-        InlineKeyboardButton("❌ لغو", callback_data=f"cancel_{amount}")
+        InlineKeyboardButton("❌ لغو شرط", callback_data=f"cancel_{amount}")
     )
 
-    waiting_games[amount] = message.from_user.id
-    name = get_name(message.from_user)
+    creator_name = get_display_name_by_id(message.from_user.id)
 
     await message.reply(
         f"🎮 بازی {amount} سکه\n"
-        f"👤 سازنده: {name}\n"
-        f"🎁 جایزه: {amount*2}\n"
+        f"👤 سازنده: {creator_name}\n"
+        f"🎁 جایزه کل: {amount * 2} سکه\n\n"
         f"منتظر بازیکن دوم...",
         reply_markup=keyboard
     )
 
+    waiting_games[amount] = message.from_user.id
 
 @dp.callback_query_handler(lambda c: c.data.startswith(("join_", "cancel_")))
-async def handle_bet(callback: CallbackQuery):
+async def handle_betting(callback: CallbackQuery):
+
     action, amount = callback.data.split("_")
     amount = int(amount)
 
     if amount not in waiting_games:
-        await callback.answer("بازی یافت نشد", show_alert=True)
+        await callback.answer("این بازی وجود ندارد", show_alert=True)
         return
 
     creator_id = waiting_games[amount]
     user_id = callback.from_user.id
 
+    get_user(callback.from_user)
+
     if action == "cancel":
         if user_id != creator_id:
             await callback.answer("فقط سازنده می‌تواند لغو کند", show_alert=True)
             return
+
         del waiting_games[amount]
         await callback.message.edit_text("❌ بازی لغو شد")
         await callback.answer()
         return
 
-    if user_id == creator_id:
-        await callback.answer("نمی‌توانی به بازی خودت بپیوندی", show_alert=True)
-        return
+    if action == "join":
 
-    get_user(user_id)
+        if user_id == creator_id:
+            await callback.answer("نمی‌توانی به بازی خودت بپیوندی", show_alert=True)
+            return
 
-    if get_balance(user_id) < amount:
-        await callback.answer("موجودی کافی نیست", show_alert=True)
-        return
+        if get_balance(user_id) < amount:
+            await callback.answer("موجودی کافی نیست", show_alert=True)
+            return
 
-    winner = random.choice([creator_id, user_id])
-    loser = creator_id if winner == user_id else user_id
+        prize = amount * 2
 
-    add_balance(winner, amount)
-    add_balance(loser, -amount)
+        winner_id = random.choice([creator_id, user_id])
+        loser_id = creator_id if winner_id == user_id else user_id
 
-    del waiting_games[amount]
+        winner_name = get_display_name_by_id(winner_id)
+        loser_name = get_display_name_by_id(loser_id)
 
-    await callback.message.edit_text(
-        f"🎲 بازی انجام شد!\n"
-        f"🏆 برنده: {winner}\n"
-        f"💎 مبلغ برد: {amount}"
-    )
-    await callback.answer("بازی انجام شد!")
+        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, creator_id))
+        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, user_id))
+        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (prize, winner_id))
+        conn.commit()
 
+        new_balance = get_balance(winner_id)
 
-# ================== ROCK PAPER SCISSORS ==================
-@dp.message_handler(lambda m: m.text and m.text.startswith("سنگچی"))
-async def rps(message: types.Message):
-    try:
-        stake = int(message.text.split()[1])
-    except:
-        stake = 0
+        del waiting_games[amount]
 
-    get_user(message.from_user.id)
+        await callback.message.edit_text(
+            f"🎲 بازی انجام شد!\n\n"
+            f"🏆 برنده: {winner_name}\n"
+            f"💀 بازنده: {loser_name}\n\n"
+            f"🎁 جایزه: {prize} سکه\n"
+            f"💎 موجودی جدید برنده: {new_balance}"
+        )
 
-    if stake > 0 and get_balance(message.from_user.id) < stake:
-        await message.reply("❌ موجودی کافی نیست")
-        return
+        await callback.answer("بازی انجام شد!")
+
+# =====================================================
+# ✂️ سنگچی
+# =====================================================
+
+@dp.message_handler(lambda message: message.text == "سنگچی")
+async def rock_paper_scissors(message: types.Message):
+
+    get_user(message.from_user)
 
     keyboard = InlineKeyboardMarkup(row_width=3)
     keyboard.add(
-        InlineKeyboardButton("🪨", callback_data=f"rps_rock_{stake}"),
-        InlineKeyboardButton("📄", callback_data=f"rps_paper_{stake}"),
-        InlineKeyboardButton("✂", callback_data=f"rps_scissors_{stake}")
+        InlineKeyboardButton("🪨 سنگ", callback_data="rps_rock"),
+        InlineKeyboardButton("📄 کاغذ", callback_data="rps_paper"),
+        InlineKeyboardButton("✂ قیچی", callback_data="rps_scissors"),
     )
 
-    await message.reply("انتخاب کن 👇", reply_markup=keyboard)
-
+    await message.reply("🎮 سنگ کاغذ قیچی\nیکی را انتخاب کن 👇", reply_markup=keyboard)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("rps_"))
 async def rps_result(callback: CallbackQuery):
-    _, choice, stake = callback.data.split("_")
-    stake = int(stake)
 
+    get_user(callback.from_user)
+
+    user_choice = callback.data.split("_")[1]
     bot_choice = random.choice(["rock", "paper", "scissors"])
 
-    win = (
-        (choice=="rock" and bot_choice=="scissors") or
-        (choice=="paper" and bot_choice=="rock") or
-        (choice=="scissors" and bot_choice=="paper")
-    )
-
     result = ""
+    reward = 0
 
-    if choice == bot_choice:
-        result = "🤝 مساوی"
-    elif win:
+    if user_choice == bot_choice:
+        result = "🤝 مساوی!"
+    elif (
+        (user_choice == "rock" and bot_choice == "scissors") or
+        (user_choice == "scissors" and bot_choice == "paper") or
+        (user_choice == "paper" and bot_choice == "rock")
+    ):
         result = "🏆 بردی!"
-        add_balance(callback.from_user.id, stake if stake>0 else 10)
+        reward = 10
+        add_balance(callback.from_user.id, reward)
     else:
         result = "😢 باختی!"
-        if stake>0:
-            add_balance(callback.from_user.id, -stake)
 
     balance = get_balance(callback.from_user.id)
 
+    emoji = {
+        "rock": "🪨 سنگ",
+        "paper": "📄 کاغذ",
+        "scissors": "✂ قیچی"
+    }
+
+    player_name = get_display_name_by_id(callback.from_user.id)
+
     await callback.message.edit_text(
-        f"انتخاب شما: {choice}\n"
-        f"انتخاب ربات: {bot_choice}\n\n"
+        f"👤 بازیکن: {player_name}\n"
+        f"👤 انتخاب شما: {emoji[user_choice]}\n"
+        f"🤖 انتخاب ربات: {emoji[bot_choice]}\n\n"
         f"{result}\n"
-        f"💎 موجودی: {balance}"
+        f"🎁 جایزه: {reward} سکه\n"
+        f"💎 موجودی فعلی: {balance}"
     )
+
     await callback.answer()
 
+# ================== وب سرور ==================
 
-# ================== WEB SERVER ==================
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is running")
 
-
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), Handler)
     server.serve_forever()
 
-
-# ================== RUN ==================
 if __name__ == "__main__":
     threading.Thread(target=run_web).start()
     executor.start_polling(dp, skip_updates=True)
