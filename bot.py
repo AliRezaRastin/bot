@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.utils import executor
 
-# گرفتن توکن از Environment
+# گرفتن توکن
 TOKEN = os.environ["TOKEN"]
 
 bot = Bot(token=TOKEN)
@@ -33,18 +33,18 @@ def get_user(user_id):
         cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user_id,))
         conn.commit()
 
+# ================== ابزار نمایش نام ==================
+
+def get_display_name(user: types.User):
+    if user.username:
+        return f"@{user.username}"
+    return user.full_name
+
 # ================== حافظه بازی‌ها ==================
 
 waiting_games = {}
-# ساختار:
-# {
-#   amount: {
-#       "creator": user_id,
-#       "message_id": msg_id
-#   }
-# }
 
-# ================== دستورات ==================
+# ================== شروع ==================
 
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
@@ -85,15 +85,18 @@ async def game(message: types.Message):
         InlineKeyboardButton("❌ لغو شرط", callback_data=f"cancel_{amount}")
     )
 
+    creator_name = get_display_name(message.from_user)
+
     msg = await message.reply(
         f"🎮 بازی {amount} 💎 ساخته شد!\n\n"
-        f"سازنده: {message.from_user.full_name}\n"
+        f"👤 سازنده: {creator_name}\n"
         f"منتظر بازیکن دوم...",
         reply_markup=keyboard
     )
 
     waiting_games[amount] = {
         "creator": message.from_user.id,
+        "creator_name": creator_name,
         "message_id": msg.message_id
     }
 
@@ -110,18 +113,20 @@ async def process_callback(callback: CallbackQuery):
         return
 
     game_data = waiting_games[amount]
-    creator = game_data["creator"]
-    user_id = callback.from_user.id
+    creator_id = game_data["creator"]
+    creator_name = game_data["creator_name"]
 
-    # ---------- لغو بازی ----------
+    user_id = callback.from_user.id
+    user_name = get_display_name(callback.from_user)
+
+    # ---------- لغو ----------
     if action == "cancel":
 
-        if user_id != creator:
+        if user_id != creator_id:
             await callback.answer("فقط سازنده می‌تواند لغو کند", show_alert=True)
             return
 
         del waiting_games[amount]
-
         await callback.message.edit_text("❌ بازی لغو شد")
         await callback.answer()
         return
@@ -129,7 +134,7 @@ async def process_callback(callback: CallbackQuery):
     # ---------- پیوستن ----------
     if action == "join":
 
-        if user_id == creator:
+        if user_id == creator_id:
             await callback.answer("❗ نمی‌توانی به بازی خودت بپیوندی", show_alert=True)
             return
 
@@ -143,11 +148,14 @@ async def process_callback(callback: CallbackQuery):
             return
 
         # انتخاب برنده
-        winner = random.choice([creator, user_id])
-        loser = creator if winner == user_id else user_id
+        winner_id = random.choice([creator_id, user_id])
+        loser_id = creator_id if winner_id == user_id else user_id
 
-        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, winner))
-        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, loser))
+        winner_name = creator_name if winner_id == creator_id else user_name
+        loser_name = creator_name if loser_id == creator_id else user_name
+
+        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, winner_id))
+        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, loser_id))
         conn.commit()
 
         del waiting_games[amount]
@@ -155,8 +163,8 @@ async def process_callback(callback: CallbackQuery):
         await callback.message.edit_text(
             f"🎲 بازی انجام شد!\n\n"
             f"💰 مبلغ شرط: {amount} سکه\n\n"
-            f"🏆 برنده: {winner}\n"
-            f"💀 بازنده: {loser}"
+            f"🏆 برنده: {winner_name}\n"
+            f"💀 بازنده: {loser_name}"
         )
 
         await callback.answer("بازی انجام شد!")
@@ -174,7 +182,7 @@ def run_web():
     server = HTTPServer(("0.0.0.0", port), Handler)
     server.serve_forever()
 
-# ================== اجرای همزمان ==================
+# ================== اجرا ==================
 
 if __name__ == "__main__":
     threading.Thread(target=run_web).start()
