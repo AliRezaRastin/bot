@@ -5,10 +5,17 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+    ReplyKeyboardMarkup,
+    KeyboardButton
+)
 from aiogram.utils import executor
 
-# گرفتن توکن
+# ================== تنظیمات ==================
+
 TOKEN = os.environ["TOKEN"]
 
 bot = Bot(token=TOKEN)
@@ -37,40 +44,55 @@ def get_balance(user_id):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
     return cursor.fetchone()[0]
 
-# ================== نمایش نام ==================
-
 def get_display_name(user: types.User):
     if user.username:
         return f"@{user.username}"
     return user.full_name
 
+# ================== کیبورد پیوی ==================
+
+def main_keyboard():
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton("💰 موجودی من"))
+    return keyboard
+
 # ================== حافظه بازی‌ها ==================
 
 waiting_games = {}
 
-# ================== /start ==================
+# ================== START (فقط پیوی) ==================
 
-@dp.message_handler(commands=['start'])
+@dp.message_handler(commands=['start'], chat_type=types.ChatType.PRIVATE)
 async def start(message: types.Message):
     get_user(message.from_user.id)
-    await message.reply("🎮 خوش آمدی به ربات علی!\nموجودی اولیه: 100 💎")
 
-# ================== موجودی ==================
+    await message.answer(
+        "🎮 به ربات خوش آمدی!\n"
+        "از دکمه زیر برای مشاهده موجودی استفاده کن 👇",
+        reply_markup=main_keyboard()
+    )
 
-@dp.message_handler(lambda message: message.text == "موجودی")
-async def balance_handler(message: types.Message):
+# ================== موجودی (فقط پیوی) ==================
+
+@dp.message_handler(lambda message: message.text == "💰 موجودی من", chat_type=types.ChatType.PRIVATE)
+async def balance_private(message: types.Message):
     get_user(message.from_user.id)
     balance = get_balance(message.from_user.id)
     name = get_display_name(message.from_user)
 
-    await message.reply(
-        f"💰 موجودی {name} : {balance} سکه 💎"
+    await message.answer(
+        f"💰 موجودی شما:\n\n"
+        f"👤 {name}\n"
+        f"💎 {balance} سکه"
     )
 
-# ================== ساخت بازی ==================
+# ================== ساخت بازی (گروه) ==================
 
-@dp.message_handler(lambda message: message.text.startswith("بازی"))
+@dp.message_handler(lambda message: message.text and message.text.startswith("بازی"))
 async def game(message: types.Message):
+
+    if message.chat.type == "private":
+        return
 
     try:
         amount = int(message.text.split()[1])
@@ -104,18 +126,17 @@ async def game(message: types.Message):
     msg = await message.reply(
         f"🎮 بازی {amount} 💎 ساخته شد!\n\n"
         f"👤 سازنده: {creator_name}\n"
-        f"🎁 جایزه: {amount * 2} سکه\n"
+        f"🎁 جایزه کل: {amount * 2} سکه\n\n"
         f"منتظر بازیکن دوم...",
         reply_markup=keyboard
     )
 
     waiting_games[amount] = {
         "creator": message.from_user.id,
-        "creator_name": creator_name,
-        "message_id": msg.message_id
+        "creator_name": creator_name
     }
 
-# ================== دکمه‌ها ==================
+# ================== مدیریت دکمه‌های بازی ==================
 
 @dp.callback_query_handler(lambda c: c.data.startswith(("join_", "cancel_")))
 async def process_callback(callback: CallbackQuery):
@@ -160,7 +181,6 @@ async def process_callback(callback: CallbackQuery):
             await callback.answer("❌ موجودی کافی نیست", show_alert=True)
             return
 
-        # هر دو مبلغ را از قبل دارند → برنده کل جایزه را می‌گیرد
         prize = amount * 2
 
         winner_id = random.choice([creator_id, user_id])
@@ -169,11 +189,11 @@ async def process_callback(callback: CallbackQuery):
         winner_name = creator_name if winner_id == creator_id else user_name
         loser_name = creator_name if loser_id == creator_id else user_name
 
-        # کم کردن از هر دو
+        # کم کردن مبلغ از هر دو
         cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, creator_id))
         cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, user_id))
 
-        # اضافه کردن جایزه به برنده
+        # دادن جایزه به برنده
         cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (prize, winner_id))
         conn.commit()
 
@@ -192,7 +212,7 @@ async def process_callback(callback: CallbackQuery):
 
         await callback.answer("بازی انجام شد!")
 
-# ================== وب سرور ==================
+# ================== وب سرور Render ==================
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
