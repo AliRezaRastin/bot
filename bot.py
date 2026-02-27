@@ -214,27 +214,33 @@ async def rps_game(message: types.Message):
 
     register_user(message.from_user)
 
-    if get_balance(message.from_user.id) < stake:
+    balance = get_balance(message.from_user.id)
+
+    if balance < stake:
         await message.reply("موجودی کافی نیست")
         return
 
-    keyboard = InlineKeyboardMarkup()
+    keyboard = InlineKeyboardMarkup(row_width=3)
     keyboard.add(
-        InlineKeyboardButton("🪨 سنگ", callback_data=f"rps_rock_{stake}_{message.from_user.id}"),
-        InlineKeyboardButton("📄 کاغذ", callback_data=f"rps_paper_{stake}_{message.from_user.id}"),
-        InlineKeyboardButton("✂ قیچی", callback_data=f"rps_scissors_{stake}_{message.from_user.id}")
+        InlineKeyboardButton("🪨 سنگ", callback_data=f"rps|rock|{stake}|{message.from_user.id}"),
+        InlineKeyboardButton("📄 کاغذ", callback_data=f"rps|paper|{stake}|{message.from_user.id}"),
+        InlineKeyboardButton("✂ قیچی", callback_data=f"rps|scissors|{stake}|{message.from_user.id}")
     )
 
-    await message.reply("انتخاب کن:", reply_markup=keyboard)
+    await message.reply(
+        f"🎮 بازی سنگچی با شرط {stake} سکه\n"
+        f"فقط سازنده می‌تواند انتخاب کند 👇",
+        reply_markup=keyboard
+    )
 
-@dp.callback_query_handler(lambda c: c.data.startswith("rps_"))
+@dp.callback_query_handler(lambda c: c.data.startswith("rps|"))
 async def rps_result(callback: CallbackQuery):
 
-    _, user_choice, stake, owner_id = callback.data.split("_")
+    _, user_choice, stake, owner_id = callback.data.split("|")
     stake = int(stake)
     owner_id = int(owner_id)
 
-    # فقط سازنده بازی اجازه دارد
+    # فقط سازنده اجازه دارد
     if callback.from_user.id != owner_id:
         await callback.answer("این بازی برای شما نیست ❌", show_alert=True)
         return
@@ -242,43 +248,152 @@ async def rps_result(callback: CallbackQuery):
     user_id = callback.from_user.id
     register_user(callback.from_user)
 
-    if get_balance(user_id) < stake:
-        await callback.answer("موجودی کافی نیست", show_alert=True)
+    balance = get_balance(user_id)
+
+    if balance < stake:
+        await callback.answer("موجودی کافی نیست ❌", show_alert=True)
         return
 
     bot_choice = random.choice(["rock", "paper", "scissors"])
 
-    win = (
+    # قوانین بازی:
+    # سنگ قیچی را می‌برد
+    # قیچی کاغذ را می‌برد
+    # کاغذ سنگ را می‌برد
+
+    if user_choice == bot_choice:
+        result_text = "🤝 مساوی!"
+        change = 0
+
+    elif (
         (user_choice == "rock" and bot_choice == "scissors") or
         (user_choice == "scissors" and bot_choice == "paper") or
         (user_choice == "paper" and bot_choice == "rock")
-    )
-
-    if user_choice == bot_choice:
-        result = "مساوی"
-        reward = 0
-    elif win:
-        result = "بردی 🎉"
-        reward = stake
+    ):
+        result_text = "🏆 بردی!"
+        change = stake
         update_balance(user_id, stake)
+
     else:
-        result = "باختی 😢"
-        reward = -stake
+        result_text = "😢 باختی!"
+        change = -stake
         update_balance(user_id, -stake)
 
-    balance = get_balance(user_id)
+    new_balance = get_balance(user_id)
     username = get_username(user_id)
 
-    emoji = {"rock":"🪨","paper":"📄","scissors":"✂"}
+    emoji = {
+        "rock": "🪨 سنگ",
+        "paper": "📄 کاغذ",
+        "scissors": "✂ قیچی"
+    }
 
     await callback.message.edit_text(
-        f"بازیکن: {username}\n"
+        f"👤 بازیکن: {username}\n\n"
         f"انتخاب شما: {emoji[user_choice]}\n"
         f"انتخاب ربات: {emoji[bot_choice]}\n\n"
-        f"نتیجه: {result}\n"
-        f"تغییر موجودی: {reward}\n"
-        f"موجودی فعلی: {balance}"
+        f"{result_text}\n"
+        f"تغییر موجودی: {change}\n"
+        f"موجودی فعلی: {new_balance}"
     )
+
+    await callback.answer()
+
+
+# =====================================================
+# 💸 انتقال موجودی
+# =====================================================
+
+@dp.message_handler(lambda message: message.text and message.text.startswith("انتقال"))
+async def transfer_coins(message: types.Message):
+
+    parts = message.text.split()
+
+    if len(parts) < 2:
+        await message.reply("فرمت صحیح:\nانتقال 50\nیا\nانتقال 50 @username")
+        return
+
+    try:
+        amount = int(parts[1])
+    except:
+        await message.reply("عدد سکه نامعتبر است")
+        return
+
+    if amount <= 0:
+        await message.reply("مبلغ باید بیشتر از صفر باشد")
+        return
+
+    sender = message.from_user
+    register_user(sender)
+
+    sender_balance = get_balance(sender.id)
+
+    if sender_balance < amount:
+        await message.reply("موجودی کافی نیست ❌")
+        return
+
+    receiver_id = None
+    receiver_name = None
+
+    # ✅ حالت ریپلی
+    if message.reply_to_message:
+        receiver = message.reply_to_message.from_user
+        register_user(receiver)
+
+        if receiver.id == sender.id:
+            await message.reply("نمی‌توانی به خودت انتقال بدهی ❌")
+            return
+
+        receiver_id = receiver.id
+        receiver_name = get_username(receiver.id)
+
+    # ✅ حالت نام کاربری
+    elif len(parts) >= 3:
+
+        username = parts[2]
+
+        if not username.startswith("@"):
+            await message.reply("نام کاربری باید با @ باشد")
+            return
+
+        cursor.execute("SELECT user_id, username FROM users WHERE username=?", (username,))
+        data = cursor.fetchone()
+
+        if not data:
+            await message.reply("کاربر پیدا نشد ❌\nکاربر باید حداقل یکبار ربات را استارت کرده باشد")
+            return
+
+        receiver_id = data[0]
+        receiver_name = data[1]
+
+        if receiver_id == sender.id:
+            await message.reply("نمی‌توانی به خودت انتقال بدهی ❌")
+            return
+
+    else:
+        await message.reply("کاربر مقصد مشخص نیست")
+        return
+
+    # انجام انتقال
+    update_balance(sender.id, -amount)
+    update_balance(receiver_id, amount)
+
+    new_sender_balance = get_balance(sender.id)
+
+    sender_name = get_username(sender.id)
+
+    await message.reply(
+        f"✅ انتقال انجام شد\n\n"
+        f"از: {sender_name}\n"
+        f"به: {receiver_name}\n"
+        f"مبلغ: {amount} سکه\n\n"
+        f"موجودی جدید شما: {new_sender_balance}"
+    )
+
+
+
+
+
 
 # ================== وب سرور ==================
 
