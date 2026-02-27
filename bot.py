@@ -3,7 +3,8 @@ import sqlite3
 import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import types, Dispatcher
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import (
     InlineKeyboardMarkup,
@@ -35,6 +36,31 @@ REQUIRED_CHANNELS = [
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
+
+# ================= دکمه های شیشه ای =================
+def get_main_menu():
+    keyboard = InlineKeyboardMarkup(row_width=2)  # row_width مشخص میکند چند دکمه در یک ردیف باشد
+
+    # تعریف دکمه ها
+    btn_activate_self = InlineKeyboardButton(text="فعال سازی سلف", callback_data="activate_self")
+    btn_support = InlineKeyboardButton(text="پشتیبانی", callback_data="support")
+    btn_profile = InlineKeyboardButton(text="پروفایل کاربری", callback_data="profile")
+    btn_self_tasks = InlineKeyboardButton(text="وظیعت سلف", callback_data="self_tasks")
+
+    # اضافه کردن دکمه ها به کیبورد
+    keyboard.add(btn_activate_self, btn_support, btn_profile, btn_self_tasks)
+    return keyboard
+
+# ================= هنگام استارت =================
+async def start_command(message: types.Message):
+    await message.answer(
+        "سلام! به ربات خوش آمدید. یکی از گزینه‌ها را انتخاب کنید:",
+        reply_markup=get_main_menu()
+    )
+
+# ================= ثبت هندلر =================
+def register_handlers(dp: Dispatcher):
+    dp.register_message_handler(start_command, commands=["start"])
 # ================== دیتابیس ==================
 # ثبت یا بروزرسانی کاربر بدون تغییر موجودی قبلی
 def register_user(user: types.User):
