@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 conn.commit()
+def get_username(user_id):
+    cursor.execute("SELECT username FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        return row[0]
+    return str(user_id)
+
 
 def register_user(user: types.User):
     username = f"@{user.username}" if user.username else user.full_name
