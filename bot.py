@@ -1,15 +1,20 @@
 import random
 import sqlite3
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 
+# گرفتن توکن از Environment
 TOKEN = os.environ["TOKEN"]
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-conn = sqlite3.connect("database.db")
+# دیتابیس
+conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -63,10 +68,29 @@ async def game(message: types.Message):
 
         del waiting_games[amount]
 
-        await message.reply(f"🎲 بازی انجام شد!\nبرنده: {winner}\nبازنده: {loser}")
+        await message.reply(
+            f"🎲 بازی انجام شد!\n"
+            f"برنده: {winner}\n"
+            f"بازنده: {loser}"
+        )
     else:
         waiting_games[amount] = message.from_user.id
         await message.reply(f"⏳ بازی {amount} 💎 ساخته شد.\nمنتظر نفر دوم...")
 
-if name == "main":
+# --------- وب سرور ساده برای Render ---------
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
+
+# اجرای همزمان وب‌سرور و بات
+if __name__ == "__main__":
+    threading.Thread(target=run_web).start()
     executor.start_polling(dp, skip_updates=True)
