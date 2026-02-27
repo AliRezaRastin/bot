@@ -36,26 +36,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
 # ================== دیتابیس ==================
-
-conn = sqlite3.connect("database.db", check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    balance INTEGER DEFAULT 100
-)
-""")
-conn.commit()
-def get_username(user_id):
-    cursor.execute("SELECT username FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-    if row and row[0]:
-        return row[0]
-    return str(user_id)
-
-
+# ثبت یا بروزرسانی کاربر بدون تغییر موجودی قبلی
 def register_user(user: types.User):
     username = f"@{user.username}" if user.username else user.full_name
 
@@ -63,36 +44,19 @@ def register_user(user: types.User):
     data = cursor.fetchone()
 
     if not data:
+        # فقط کاربر جدید اضافه شود و موجودی اولیه 100 داده شود
         cursor.execute(
             "INSERT INTO users (user_id, username, balance) VALUES (?, ?, ?)",
             (user.id, username, 100)
         )
     else:
+        # اگر کاربر قبلاً وجود دارد، فقط نام کاربری را آپدیت کن
         cursor.execute(
             "UPDATE users SET username=? WHERE user_id=?",
             (username, user.id)
         )
 
     conn.commit()
-
-def get_balance(user_id):
-    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-    return cursor.fetchone()[0]
-
-def update_balance(user_id, amount):
-    cursor.execute(
-        "UPDATE users SET balance = balance + ? WHERE user_id=?",
-        (amount, user_id)
-    )
-    conn.commit()
-
-def get_user(user_id):
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-    if not row:
-        # فقط اگر کاربر وجود نداشت، اضافه شود و موجودی اولیه 100 داده شود
-        cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, 100))
-        conn.commit()
 # ================== کیبورد پیوی ==================
 
 def main_keyboard():
