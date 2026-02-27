@@ -113,7 +113,12 @@ def get_user(user_id):
         # فقط اگر کاربر وجود نداشت، اضافه شود و موجودی اولیه 100 داده شود
         cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, 100))
         conn.commit()
-
+def get_username(user_id):
+    cursor.execute("SELECT username FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        return row[0]
+    return str(user_id)  # اگر کاربر پیدا نشد، id را برگرداند
 # ================== کیبورد پیوی ==================
 
 def main_keyboard():
