@@ -36,10 +36,14 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
 # ================== دیتابیس ==================
+# ================== دیتابیس ==================
+import sqlite3
+from aiogram import types
 
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# ایجاد جدول users
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -49,6 +53,7 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
+# ثبت یا بروزرسانی کاربر
 def register_user(user: types.User):
     username = f"@{user.username}" if user.username else user.full_name
 
@@ -56,11 +61,13 @@ def register_user(user: types.User):
     data = cursor.fetchone()
 
     if not data:
+        # فقط یک بار موجودی اولیه 100 داده شود
         cursor.execute(
             "INSERT INTO users (user_id, username, balance) VALUES (?, ?, ?)",
             (user.id, username, 100)
         )
     else:
+        # بروزرسانی نام کاربری بدون تغییر موجودی
         cursor.execute(
             "UPDATE users SET username=? WHERE user_id=?",
             (username, user.id)
@@ -68,10 +75,13 @@ def register_user(user: types.User):
 
     conn.commit()
 
+# گرفتن موجودی
 def get_balance(user_id):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-    return cursor.fetchone()[0]
+    row = cursor.fetchone()
+    return row[0] if row else 0
 
+# تغییر موجودی
 def update_balance(user_id, amount):
     cursor.execute(
         "UPDATE users SET balance = balance + ? WHERE user_id=?",
@@ -79,6 +89,7 @@ def update_balance(user_id, amount):
     )
     conn.commit()
 
+# فقط بررسی و اضافه کردن کاربر در دیتابیس بدون تغییر موجودی قبلی
 def get_user(user_id):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
