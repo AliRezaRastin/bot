@@ -15,6 +15,9 @@ from aiogram.types import (
 from aiogram.utils import executor
 
 TOKEN = os.environ["TOKEN"]
+# ================== FORCE JOIN ==================
+CHANNEL_USERNAME = "slfvtn"
+CHANNEL_LINK = "https://t.me/slfvtn"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
@@ -393,7 +396,35 @@ async def transfer_coins(message: types.Message):
 
 
 
+# ================== FORCE JOIN CHECK ==================
+@dp.message_handler(lambda message: message.chat.type in ["group", "supergroup"], content_types=types.ContentTypes.ANY)
+async def force_join_check(message: types.Message):
+    user_id = message.from_user.id
 
+    try:
+        member = await bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
+
+        # اگر عضو نبود
+        if member.status in ["left", "kicked"]:
+            try:
+                await message.delete()
+            except:
+                pass
+
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(
+                InlineKeyboardButton("📢 عضویت در کانال", url=CHANNEL_LINK)
+            )
+
+            await message.answer(
+                "❌ برای ارسال پیام باید عضو کانال زیر شوید 👇",
+                reply_markup=keyboard
+            )
+            return
+
+    except:
+        # اگر ربات داخل کانال ادمین نباشد اینجا خطا می‌دهد
+        pass
 
 # ================== وب سرور ==================
 
